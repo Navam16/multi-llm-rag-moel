@@ -53,7 +53,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.tools import DuckDuckGoSearchRun, WikipediaQueryRun, ArxivQueryRun
+from langchain_community.tools import WikipediaQueryRun, ArxivQueryRun
 from langchain_community.utilities import WikipediaAPIWrapper, ArxivAPIWrapper
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
@@ -62,6 +62,14 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage, BaseMessage
 from typing import TypedDict, Annotated
 from langgraph.graph.message import add_messages
+
+# SAFELY IMPORT DUCKDUCKGO
+try:
+    from langchain_community.tools import DuckDuckGoSearchRun
+    ddg_available = True
+except ImportError:
+    ddg_available = False
+    st.warning("⚠️ Web Search tool could not be loaded. Continuing without it.")
 
 # ==========================================
 # 3. SIDEBAR: MODEL SELECTION
@@ -109,12 +117,20 @@ def get_llm_instance(choice):
 
 @st.cache_resource
 def setup_agent(model_choice, pdf_data=None):
+    # Initialize Tools List
     tools = [
-        DuckDuckGoSearchRun(name="web_search"),
         WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper()),
         ArxivQueryRun(api_wrapper=ArxivAPIWrapper())
     ]
     
+    # Add Web Search only if available
+    if ddg_available:
+        try:
+            tools.append(DuckDuckGoSearchRun(name="web_search"))
+        except Exception:
+            pass # Skip if it fails at runtime
+    
+    # Add RAG Tool if PDF uploaded
     if pdf_data:
         with open("temp_rag.pdf", "wb") as f:
             f.write(pdf_data.getbuffer())
