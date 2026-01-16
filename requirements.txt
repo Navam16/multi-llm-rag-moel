@@ -5,6 +5,7 @@ langchain-google-genai
 langchain-community
 langchain-core
 langchain-text-splitters
+langchain-huggingface
 langgraph
 duckduckgo-search
 pypdf
