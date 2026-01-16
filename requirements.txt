@@ -7,7 +7,7 @@ langchain-core
 langchain-text-splitters
 langchain-huggingface
 langgraph
-duckduckgo-search>=6.0.0
+duckduckgo-search>=5.0
 pypdf
 faiss-cpu
 sentence-transformers
