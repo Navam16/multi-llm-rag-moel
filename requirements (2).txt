@@ -1,0 +1,15 @@
+streamlit
+langchain-groq
+langchain-openai
+langchain-google-genai
+langchain-community
+langchain-core
+langchain-text-splitters
+langgraph
+duckduckgo-search
+pypdf
+faiss-cpu
+sentence-transformers
+wikipedia
+arxiv
+langsmith
