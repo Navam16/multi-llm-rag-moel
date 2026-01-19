@@ -6,7 +6,7 @@ import uuid
 # 1. APP CONFIGURATION & STYLING
 # ==========================================
 st.set_page_config(
-    page_title="OmniAgent Pro",
+    page_title="navam llm",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
