@@ -3,49 +3,39 @@ import os
 import uuid
 
 # ==========================================
-# 1. APP CONFIGURATION & STYLING
+# 1. SETUP & CONFIGURATION
 # ==========================================
-st.set_page_config(
-    page_title="navam llm",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="OmniAgent Pro", page_icon="🤖", layout="wide")
 
-# Custom CSS
+# Custom CSS for status indicators
 st.markdown("""
 <style>
     .stApp { background-color: #f9fafb; }
-    [data-testid="stSidebar"] { background-color: #ffffff; border-right: 1px solid #e5e7eb; }
-    
-    .status-badge {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 12px;
-        background-color: #f0fdf4;
-        border: 1px solid #dcfce7;
-        border-radius: 9999px;
-        color: #166534;
-        font-size: 0.75rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
+    .success-box {
+        padding: 10px; border-radius: 5px; background-color: #d1fae5;
+        color: #065f46; border: 1px solid #34d399; margin-bottom: 10px;
+    }
+    .warning-box {
+        padding: 10px; border-radius: 5px; background-color: #fef3c7;
+        color: #92400e; border: 1px solid #f59e0b; margin-bottom: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. API SETUP
+# 2. API KEYS
 # ==========================================
 try:
     GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
     OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-except FileNotFoundError:
-    st.error("🚨 Secrets not found!")
+except Exception:
+    st.error("🚨 Secrets not found! Please check your Streamlit settings.")
     st.stop()
 
-# Imports
+# ==========================================
+# 3. IMPORTS
+# ==========================================
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -59,97 +49,93 @@ from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import HumanMessage, BaseMessage
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from typing import TypedDict, Annotated
 from langgraph.graph.message import add_messages
 
-# SAFELY IMPORT DUCKDUCKGO
-try:
-    from langchain_community.tools import DuckDuckGoSearchRun
-    ddg_available = True
-except ImportError:
-    ddg_available = False
-    st.warning("⚠️ Web Search tool could not be loaded. Continuing without it.")
-
 # ==========================================
-# 3. SIDEBAR: MODEL SELECTION
+# 4. SIDEBAR & PDF DIAGNOSTICS
 # ==========================================
 with st.sidebar:
     st.title("🤖 OmniAgent")
     st.caption("Research Suite")
-    st.divider()
-
-    st.markdown('**🧠 Select AI Model**')
-    model_option = st.selectbox(
-        "Choose Model",
-        [
-            "Llama 3.1 70B (via Groq)",
-            "Llama 3.1 8B (via Groq)",
-            "Gemini 1.5 Pro (Google)",
-            "GPT-4o (OpenAI)",
-            "Mixtral 8x7B (via Groq)"
-        ]
-    )
-
-    st.markdown('**📂 Knowledge Base**')
-    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
     
-    if st.button("🗑️ Clear Chat", use_container_width=True):
+    model_choice = st.selectbox("Choose Model", 
+        ["Llama 3.1 8B (Groq - Fast)", "Llama 3.1 70B (Groq)", "GPT-4o (OpenAI)"])
+    
+    st.divider()
+    st.markdown("**📂 Knowledge Base**")
+    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
+
+    # --- PDF DIAGNOSTIC LOGIC ---
+    pdf_processed = False
+    
+    if uploaded_file:
+        with st.spinner("Analyzing PDF..."):
+            try:
+                # Save temp file
+                with open("temp.pdf", "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                # Load & Check text
+                loader = PyPDFLoader("temp.pdf")
+                raw_docs = loader.load()
+                
+                total_chars = sum([len(d.page_content) for d in raw_docs])
+                
+                if total_chars > 100:
+                    st.success(f"✅ Loaded {len(raw_docs)} pages.")
+                    pdf_processed = True
+                else:
+                    st.error("⚠️ PDF appears empty or is a scanned image (OCR needed).")
+                    pdf_processed = False
+            except Exception as e:
+                st.error(f"❌ Error reading PDF: {e}")
+
+    if st.button("🧹 Clear Chat"):
         st.session_state.messages = []
         st.session_state.thread_id = str(uuid.uuid4())
         st.rerun()
 
-# ==========================================
-# 4. LLM BACKEND
-# ==========================================
-def get_llm_instance(choice):
-    if "Llama 3.1 70B" in choice:
-        return ChatGroq(model="llama-3.1-70b-versatile", api_key=GROQ_API_KEY, temperature=0)
-    elif "Llama 3.1 8B" in choice:
-        return ChatGroq(model="llama-3.1-8b-instant", api_key=GROQ_API_KEY, temperature=0)
-    elif "Mixtral" in choice:
-        return ChatGroq(model="mixtral-8x7b-32768", api_key=GROQ_API_KEY, temperature=0)
-    elif "GPT-4o" in choice:
-        return ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY, temperature=0)
-    elif "Gemini" in choice:
-        return ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=GOOGLE_API_KEY, temperature=0)
-    return ChatGroq(model="llama-3.1-8b-instant", api_key=GROQ_API_KEY)
+def get_llm(choice):
+    if "8B" in choice:
+        return ChatGroq(model="llama-3.1-8b-instant", api_key=GROQ_API_KEY)
+    elif "GPT" in choice:
+        return ChatOpenAI(model="gpt-4o", api_key=OPENAI_API_KEY)
+    return ChatGroq(model="llama-3.1-70b-versatile", api_key=GROQ_API_KEY)
 
-@st.cache_resource
-def setup_agent(model_choice, pdf_data=None):
-    # Initialize Tools List
+# ==========================================
+# 5. AGENT LOGIC
+# ==========================================
+@st.cache_resource(show_spinner=False)
+def setup_agent(model_name, has_pdf):
+    # Standard Tools
     tools = [
         WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper()),
         ArxivQueryRun(api_wrapper=ArxivAPIWrapper())
     ]
     
-    # Add Web Search only if available
-    if ddg_available:
-        try:
-            tools.append(DuckDuckGoSearchRun(name="web_search"))
-        except Exception:
-            pass # Skip if it fails at runtime
-    
-    # Add RAG Tool if PDF uploaded
-    if pdf_data:
-        with open("temp_rag.pdf", "wb") as f:
-            f.write(pdf_data.getbuffer())
-        loader = PyPDFLoader("temp_rag.pdf")
+    # Add PDF Tool ONLY if processing was successful
+    if has_pdf:
+        loader = PyPDFLoader("temp.pdf")
         docs = loader.load()
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        splits = splitter.split_documents(docs)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        splits = text_splitter.split_documents(docs)
         embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        vector_store = FAISS.from_documents(splits, embeddings)
-        retriever = vector_store.as_retriever()
+        vectorstore = FAISS.from_documents(splits, embeddings)
+        retriever = vectorstore.as_retriever()
         
         @tool
-        def query_pdf(question: str):
-            """Use this to answer questions about the uploaded PDF file."""
-            results = retriever.invoke(question)
-            return "\n\n".join([doc.page_content for doc in results])
+        def query_pdf(query: str):
+            """Use this tool to answer questions about the uploaded PDF document."""
+            results = retriever.invoke(query)
+            # We explicitly label the data so the LLM knows it comes from the PDF
+            formatted_results = "\n\n".join([f"Page {d.metadata.get('page', '?')}: {d.page_content}" for d in results])
+            return f"SOURCE: UPLOADED PDF DOCUMENT\n\n{formatted_results}"
+            
         tools.append(query_pdf)
 
-    llm = get_llm_instance(model_choice)
+    llm = get_llm(model_name)
     llm_with_tools = llm.bind_tools(tools)
     
     class State(TypedDict):
@@ -164,54 +150,64 @@ def setup_agent(model_choice, pdf_data=None):
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", tools_condition)
     graph.add_edge("tools", "agent")
+    
     return graph.compile(checkpointer=MemorySaver())
 
-agent_app = setup_agent(model_option, uploaded_file)
-
 # ==========================================
-# 5. CHAT UI
+# 6. CHAT INTERFACE
 # ==========================================
-st.markdown("""
-<div style="margin-bottom: 20px;">
-    <div class="status-badge">
-        <span style="width: 8px; height: 8px; background-color: #22c55e; border-radius: 50%; margin-right: 8px;"></span>
-        Agent Active
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid.uuid4())
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    st.chat_message(msg["role"]).write(msg["content"])
 
-if prompt := st.chat_input("Ask OmniAgent..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+if user_input := st.chat_input("Ask about the PDF..."):
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.chat_message("user").write(user_input)
+    
+    agent = setup_agent(model_choice, pdf_processed)
+    config = {"configurable": {"thread_id": st.session_state.thread_id}}
+    
+    # --- ENHANCED SYSTEM PROMPT FOR CITATIONS ---
+    system_instruction = """You are a helpful research assistant. 
+    IMPORTANT CITATION RULES:
+    1. If you used the 'query_pdf' tool, you MUST end your answer with: 
+       '**Source:** Uploaded PDF Document'
+    2. If you used Wikipedia, you MUST end your answer with:
+       '**Source:** Wikipedia'
+    3. If you used Arxiv, you MUST end your answer with:
+       '**Source:** Arxiv'
+    4. If you used your own knowledge, do not include a source.
+    """
+    
+    if pdf_processed:
+        system_instruction += "\nA PDF is currently uploaded. Prioritize checking the PDF for answers."
 
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        config = {"configurable": {"thread_id": st.session_state.thread_id}}
+        full_response = ""
         
-        with st.spinner(f"Thinking with {model_option}..."):
-            events = agent_app.stream(
-                {"messages": [HumanMessage(content=prompt)]},
+        with st.spinner("Searching..."):
+            input_messages = [
+                SystemMessage(content=system_instruction),
+                HumanMessage(content=user_input)
+            ]
+            
+            events = agent.stream(
+                {"messages": input_messages},
                 config=config,
                 stream_mode="values"
             )
-            full_response = ""
+            
             for event in events:
                 if "messages" in event:
-                    full_response = event["messages"][-1].content
-                    message_placeholder.markdown(full_response)
-            
-            if not full_response:
-                full_response = "✅ Task completed."
-                message_placeholder.markdown(full_response)
-                
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    latest_msg = event["messages"][-1]
+                    if latest_msg.type == "ai":
+                        full_response = latest_msg.content
+                        message_placeholder.markdown(full_response + "▌")
+        
+        message_placeholder.markdown(full_response)
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
